@@ -1,0 +1,10 @@
+---
+title: "STAT3302FinalProject_Report"
+author: "Dominick Yacono.5"
+date: "2024-04-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
