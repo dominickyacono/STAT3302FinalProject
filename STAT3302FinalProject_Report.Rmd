@@ -43,15 +43,27 @@ game_data <- subset(game_data, select = columns_to_keep)
 head(game_data_player_specific,5)
 ```
 
-We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', 'COMMENT', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games.
-We can drop 'START_POSITION' and 'MIN', because the information about the data on Kaggle informed us that only 62% of the rows have start position observations.
+We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games.
+We can drop 'START_POSITION', 'MIN', and 'PLUS_MINUS' because not many of the rows have values for these columns.
 
 ```{r}
 # Removing columns from game_data
-columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "NICKNAME", "COMMENT", "TEAM_ABBREVIATION", "START_POSITION", "MIN")]
+columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "MIN", "PLUS_MINUS", "NICKNAME", "TEAM_ABBREVIATION", "START_POSITION")]
 game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
 
 game_data_player_specific 
+```
+
+We will remove 'COMMENT' as well, but first we must filter the data to not include players with comment of "DNP - Coach's Decision".  Players with this comments did not play in the game, so therefore they are not useful in our analysis.
+
+```{r}
+#Filtering the game_data_player_specific
+game_data_player_specific_filtered <- game_data_player_specific[!game_data_player_specific$COMMENT == "	DNP - Coach's Decision", ]
+
+#Removing "COMMENT" column
+columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("COMMENT")]
+game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
+game_data_player_specific
 ```
 
 ## Combining Into One Dataframe
@@ -67,3 +79,6 @@ total_game_data
 ```
 
 ## Aggregating The Data
+
+Now that the data has been combined, we must aggregate the player specific data. This will allow us to analyze how the team performed as a whole for each game.
+
