@@ -7,4 +7,63 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+#importing libraries
+library(alr4)
+library(tidyverse)
+library(broom)
+
+#importing datasets
+game_data <- read.csv('NBAData/games.csv')
+game_data_player_specific <- read.csv('NBAData/games_details.csv')
 ```
+
+# Exploratory Data Analysis
+
+## Removing Unnecessary Columns
+
+To conduct our analysis of NBA data, we are utilizing two datasets. We are mainly interested in what skills are most effective toward affecting the odds of a home team winning. 
+
+First, let's find which columns in the datasets will not be helpful in our analysis.
+
+### games.csv file
+```{r}
+head(game_data,5)
+```
+
+The 'GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID', and 'TEAM_ID_home' variables will be important to keep since they unique identify each game. Since we are looking at the skill/performance realted factors that influence victory, we can remove 'GAME_DATE_EST' and 'SEASON'. There also appear to be duplicate columns for the home team ID and away team ID, so we will remove these columns. 
+
+```{r}
+# Removing columns from game_data
+columns_to_keep <- names(game_data)[!names(game_data) %in% c("GAME_DATE_EST", "SEASON", "TEAM_ID_home", "TEAM_ID_away")]
+game_data <- subset(game_data, select = columns_to_keep)
+```
+
+### games_details.csv file
+```{r}
+head(game_data_player_specific,5)
+```
+
+We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', 'COMMENT', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games.
+We can drop 'START_POSITION' and 'MIN', because the information about the data on Kaggle informed us that only 62% of the rows have start position observations.
+
+```{r}
+# Removing columns from game_data
+columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "NICKNAME", "COMMENT", "TEAM_ABBREVIATION", "START_POSITION", "MIN")]
+game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
+
+game_data_player_specific 
+```
+
+## Combining Into One Dataframe
+
+Let's join the tables by GAME_ID
+
+```{r}
+# Removing columns from game_data
+total_game_data <- merge(x = game_data_player_specific, y = game_data, by.x = "GAME_ID", by.y = "GAME_ID", all.x = FALSE, all.y = FALSE)
+total_game_data <- total_game_data[order(total_game_data$GAME_ID), ] 
+
+total_game_data
+```
+
+## Aggregating The Data
