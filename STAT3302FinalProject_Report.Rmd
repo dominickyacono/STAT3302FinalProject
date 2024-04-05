@@ -1,6 +1,6 @@
 ---
 title: "STAT3302FinalProject_Report"
-author: "Dominick Yacono.5"
+author: "Dominick Yacono, Ben Gavie, Jack Kamnikar"
 date: "2024-04-05"
 output: pdf_document
 ---
