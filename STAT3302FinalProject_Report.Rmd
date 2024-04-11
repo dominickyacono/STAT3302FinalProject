@@ -11,17 +11,24 @@ knitr::opts_chunk$set(echo = TRUE)
 library(alr4)
 library(tidyverse)
 library(broom)
+library(ggplot2)
 
 #importing datasets
 game_data <- read.csv('NBAData/games.csv')
 game_data_player_specific <- read.csv('NBAData/games_details.csv')
 ```
 
+In this project, we are analyzing the factors that have an affect on the odds of a home team winning on home court in the NBA. 
+
+To conduct our analysis of NBA data, we are utilizing two datasets—'games.csv' and 'game_details.csv'.  We are mainly interested in what skills are most effective toward affecting the odds of a home team winning. Because this dataset is so large and we have issues handling such large files on our systems, we will limit the data to the 2022 NBA season. 
+
+```{R}
+game_data <- game_data[game_data$SEASON == "2022", ]
+```
+
 # Exploratory Data Analysis
 
 ## Removing Unnecessary Columns
-
-To conduct our analysis of NBA data, we are utilizing two datasets. We are mainly interested in what skills are most effective toward affecting the odds of a home team winning. 
 
 First, let's find which columns in the datasets will not be helpful in our analysis.
 
@@ -30,12 +37,13 @@ First, let's find which columns in the datasets will not be helpful in our analy
 head(game_data,5)
 ```
 
-The 'GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID', and 'TEAM_ID_home' variables will be important to keep since they unique identify each game. Since we are looking at the skill/performance realted factors that influence victory, we can remove 'GAME_DATE_EST' and 'SEASON'. There also appear to be duplicate columns for the home team ID and away team ID, so we will remove these columns. 
+The 'GAME_ID', 'HOME_TEAM_ID', and 'VISITOR_TEAM_ID' variables will be important to keep since they unique identify each game. Since we are looking at the skill/performance realted factors that influence victory, we can remove 'GAME_DATE_EST', 'SEASON', and 'GAME_STATUS_TEXT'. There also appear to be duplicate columns for the home team ID and away team ID, so we will remove these columns. 
 
 ```{r}
 # Removing columns from game_data
-columns_to_keep <- names(game_data)[!names(game_data) %in% c("GAME_DATE_EST", "SEASON", "TEAM_ID_home", "TEAM_ID_away")]
+columns_to_keep <- names(game_data)[!names(game_data) %in% c("GAME_DATE_EST", "SEASON", "GAME_STATUS_TEXT" ,"TEAM_ID_home", "TEAM_ID_away")]
 game_data <- subset(game_data, select = columns_to_keep)
+game_data
 ```
 
 ### games_details.csv file
@@ -43,12 +51,10 @@ game_data <- subset(game_data, select = columns_to_keep)
 head(game_data_player_specific,5)
 ```
 
-We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games.
-We can drop 'START_POSITION', 'MIN', and 'PLUS_MINUS' because not many of the rows have values for these columns.
-
+We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', 'START_POSITION', 'MIN', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games. 
 ```{r}
 # Removing columns from game_data
-columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "MIN", "PLUS_MINUS", "NICKNAME", "TEAM_ABBREVIATION", "START_POSITION")]
+columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "NICKNAME", "TEAM_ABBREVIATION", "START_POSITION", "MIN")]
 game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
 
 game_data_player_specific 
@@ -58,12 +64,14 @@ We will remove 'COMMENT' as well, but first we must filter the data to not inclu
 
 ```{r}
 #Filtering the game_data_player_specific
-game_data_player_specific_filtered <- game_data_player_specific[!game_data_player_specific$COMMENT == "	DNP - Coach's Decision", ]
+game_data_player_specific_filtered <- game_data_player_specific[!game_data_player_specific$COMMENT != "", ]
 
 #Removing "COMMENT" column
-columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("COMMENT")]
-game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
-game_data_player_specific
+columns_to_keep <- names(game_data_player_specific_filtered)[!names(game_data_player_specific_filtered) %in% c("COMMENT")]
+game_data_player_specific_filtered <- subset(game_data_player_specific_filtered, select = columns_to_keep)
+game_data_player_specific_filtered
+
+game_data_player_specific_filtered
 ```
 
 ## Combining Into One Dataframe
@@ -72,13 +80,138 @@ Let's join the tables by GAME_ID
 
 ```{r}
 # Removing columns from game_data
-total_game_data <- merge(x = game_data_player_specific, y = game_data, by.x = "GAME_ID", by.y = "GAME_ID", all.x = FALSE, all.y = FALSE)
+total_game_data <- merge(x = game_data_player_specific_filtered, y = game_data, by.x = "GAME_ID", by.y = "GAME_ID", all.x = FALSE, all.y = FALSE)
 total_game_data <- total_game_data[order(total_game_data$GAME_ID), ] 
 
 total_game_data
 ```
 
+Some columns between 'games.csv' and 'gamesdata.csv' are shared and cover the same attributes, so let' remove 'FCM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', and 'AST'. 
+
+
+
 ## Aggregating The Data
 
 Now that the data has been combined, we must aggregate the player specific data. This will allow us to analyze how the team performed as a whole for each game.
 
+First, we can see that we have 'FGM' (Field goals made) and 'FGA' (Field goals attempted). We can make an aggregated variables out of this. Let's make a variable 
+
+```{R}
+# Removing columns from total_game_data
+columns_to_keep <- names(total_game_data)[!names(total_game_data) %in% c('FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', 'AST')]
+total_game_data <- subset(total_game_data, select = columns_to_keep)
+
+total_game_data
+```
+
+We will aggregate the data for just home teams, since this study is examining them.
+
+#### Aggregating The Data For Home Teams
+```{R}
+# Only obtain players that played for the home team
+home_team_stats_aggregated <- filter(total_game_data, TEAM_ID == HOME_TEAM_ID)
+home_team_stats_aggregated
+
+#Group by game_id and make aggregate data
+home_team_stats_aggregated <- home_team_stats_aggregated %>% group_by(GAME_ID, HOME_TEAM_ID, VISITOR_TEAM_ID, PTS_home, FG_PCT_home, FT_PCT_home, FG3_PCT_home, AST_home, REB_home, HOME_TEAM_WINS) %>%
+  summarize(OREB_home = sum(OREB), DREB_home = sum(DREB), STL_home = sum(STL), 
+            BLK_home = sum(BLK), TO_home = sum(TO), PF_home = sum(PF), avg_PTS_per_player_home = mean(PTS), avg_PLUS_MINUS_per_player_home = mean(PLUS_MINUS)) 
+
+#Remove GAME_ID, HOME_TEAM_ID, and VISITOR_TEAM_ID now since we are done bringing the data together 
+
+columns_to_keep <- names(home_team_stats_aggregated)[!names(home_team_stats_aggregated) %in% c("GAME_ID","TEAM_ID", "HOME_TEAM_ID", "VISITOR_TEAM_ID")]
+home_team_stats_aggregated <- subset(home_team_stats_aggregated, select = columns_to_keep)
+
+home_team_stats_aggregated 
+```
+
+## Univariate Analysis
+
+### Analyzing Central Tendency
+```{R}
+columns_to_keep <- names(home_team_stats_aggregated)[!names(home_team_stats_aggregated) %in% c("HOME_TEAM_WINS")]
+home_team_stats_aggregated_no_response <- subset(home_team_stats_aggregated, select = columns_to_keep)
+
+summary(home_team_stats_aggregated_no_response)
+```
+
+```{R}
+column_names <- names(home_team_stats_aggregated_no_response)
+
+for (col in column_names) {
+  boxplot(home_team_stats_aggregated_no_response[, col], main = col, xlab = col, ylab = "", notch = FALSE)
+}
+```
+
+### Analyzing Spread
+
+```{R}
+column_names <- names(home_team_stats_aggregated_no_response) 
+
+density_plots <- lapply(column_names, function(col) {
+  ggplot(home_team_stats_aggregated_no_response, aes_string(x = col)) +
+    stat_density(aes(), geom = "area", alpha = 0.5) +  
+    labs(title = col, x = col, y = "Density") +
+    theme_bw()
+})
+
+density_plots
+
+```
+
+### Q-Q Plots and Normality
+
+```{R}
+qqnorm(home_team_stats_aggregated_no_response$PTS_home, main = "QQplot of PTS_Home")
+qqline(home_team_stats_aggregated_no_response$PTS_home)
+
+qqnorm(home_team_stats_aggregated_no_response$FG_PCT_home, main = "QQplot of FG_PCT_Home")
+qqline(home_team_stats_aggregated_no_response$FG_PCT_home)
+
+qqnorm(home_team_stats_aggregated_no_response$FT_PCT_home, main = "QQplot of FT_PCT_Home")
+qqline(home_team_stats_aggregated_no_response$FT_PCT_home)
+
+qqnorm(home_team_stats_aggregated_no_response$FG3_PCT_home, main = "QQplot of FG3_PCT_Home")
+qqline(home_team_stats_aggregated_no_response$FG3_PCT_home)
+
+qqnorm(home_team_stats_aggregated_no_response$AST_home, main = "QQplot of AST_Home")
+qqline(home_team_stats_aggregated_no_response$AST_home)
+
+qqnorm(home_team_stats_aggregated_no_response$REB_home, main = "QQplot of REB_Home")
+qqline(home_team_stats_aggregated_no_response$REB_home)
+
+qqnorm(home_team_stats_aggregated_no_response$OREB_home, main = "QQplot of OREB_Home")
+qqline(home_team_stats_aggregated_no_response$OREB_home)
+
+qqnorm(home_team_stats_aggregated_no_response$DREB_home, main = "QQplot of DREB_Home")
+qqline(home_team_stats_aggregated_no_response$DREB_home)
+
+qqnorm(home_team_stats_aggregated_no_response$STL_home, main = "QQplot of STL_Home")
+qqline(home_team_stats_aggregated_no_response$STL_home)
+  
+qqnorm(home_team_stats_aggregated_no_response$BLK_home, main = "QQplot of BLK_Home")
+qqline(home_team_stats_aggregated_no_response$BLK_home)
+
+qqnorm(home_team_stats_aggregated_no_response$TO_home, main = "QQplot of TO_Home")
+qqline(home_team_stats_aggregated_no_response$TO_home)
+
+qqnorm(home_team_stats_aggregated_no_response$PF_home, main = "QQplot of PF_Home")
+qqline(home_team_stats_aggregated_no_response$PF_home)
+
+qqnorm(home_team_stats_aggregated_no_response$avg_PTS_per_player_home, main = "QQplot of Avg_PTS_per_player_Home")
+qqline(home_team_stats_aggregated_no_response$avg_PTS_per_player_home)
+
+qqnorm(home_team_stats_aggregated_no_response$avg_PLUS_MINUS_per_player_home, main = "QQplot of Avg_PLUS_MINUS_per_player_Home")
+qqline(home_team_stats_aggregated_no_response$avg_PLUS_MINUS_per_player_home)
+```
+  
+For the most part, all our variables appear to be somewhat normal. There is no need to do transformations.  
+
+## Multivariate Analysis
+
+### Pairplots
+
+
+
+  
+```
