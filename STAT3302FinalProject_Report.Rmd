@@ -13,51 +13,60 @@ library(tidyverse)
 library(broom)
 library(ggplot2)
 library(corrplot)
+library(knitr)
+library(data.table)
+library(MASS)
+```
 
+```{R}
 #importing datasets
 game_data <- read.csv('NBAData/games.csv')
 game_data_player_specific <- read.csv('NBAData/games_details.csv')
 ```
 
-In this project, we are analyzing the factors that have an affect on the odds of a home team winning on home court in the NBA. 
+In this project, we are analyzing the factors that have an effect on the odds of a team winning on home court in the NBA. We will use a logistic regression to analyze this. 
 
-To conduct our analysis of NBA data, we are utilizing two datasets—'games.csv' and 'game_details.csv'.  We are mainly interested in what skills are most effective toward affecting the odds of a home team winning. Because this dataset is so large and we have issues handling such large files on our systems, we will limit the data to the 2022 NBA season. 
+To conduct our analysis of NBA data, we are utilizing two datasets—'games.csv' and 'game_details.csv'.The datasets pertains to each game in the NBA dating from the 2003-04 season to December of the 2022 season. Fitting data from the 26,651 games within these dataframes to our model might significantly create overfitting. The model can become too focused on adjusting to specific patterns in the training data, including noise and irrelevant details. Therefore, we will only train our model on data from the 2021-2022 season. 'games.csv' has general data for each game, while 'game_details.csv' has individual observations for each player's performance in every game. 
 
-```{R}
-game_data <- game_data[game_data$SEASON == "2022", ]
-nrow(game_data)
-```
-We are working with 542 observations from 2022 season games.
+We are mainly interested in what skills are most effective toward affecting the odds of a home team winning. Therefore, we are going to use the general data on team performance from 'games.csv' while also aggregating the player data in 'game_details.csv' for each game.
 
 # Exploratory Data Analysis
 
-## Removing Unnecessary Columns
+## Removing Unnecessary Columns and Cleaning
 
-First, let's find which columns in the datasets will not be helpful in our analysis.
+First, let's filter to only games from the 2021-2022 season. Then, let's find which columns in the datasets will not be helpful in our analysis.
 
 ### games.csv file
 ```{r}
+# start and end dates
+start_date <- as.Date("2021-10-03")  # Inclusive of start date
+end_date <- as.Date("2022-06-16")
+game_data <- game_data[game_data$GAME_DATE_EST %between% c(start_date, end_date), ]
+
+
+#taking a look at games.csv
 head(game_data,5)
 ```
 
-The 'GAME_ID', 'HOME_TEAM_ID', and 'VISITOR_TEAM_ID' variables will be important to keep since they unique identify each game. Since we are looking at the skill/performance related factors that influence victory, we can remove 'GAME_DATE_EST', 'SEASON', and 'GAME_STATUS_TEXT'. We can also remove 'PTS_home' since it likely is influenced by other factors already in the model like shooting percentages. Also, factors like shooting percentages are more valuable since they describe more specific skills needed rather than simply "make more points".There also appear to be duplicate columns for the home team ID and away team ID, so we will remove these columns. 
+The 'GAME_ID', 'HOME_TEAM_ID', and 'VISITOR_TEAM_ID' variables will be important to keep since they unique identify each game. Since we are looking at the skill/performance related factors that influence victory, we can remove 'GAME_DATE_EST', 'SEASON', and 'GAME_STATUS_TEXT'. We can also remove 'PTS_home' since it likely is influenced by other factors already in the model like shooting percentages. Also, factors like shooting percentages are more valuable since they describe shot accuracy rather than simply "make more points".There also appear to be duplicate columns for the home team ID and away team ID, so we will remove these columns. 
 
 ```{r}
 # Removing columns from game_data
 columns_to_keep <- names(game_data)[!names(game_data) %in% c("GAME_DATE_EST", "SEASON", "PTS_home", "GAME_STATUS_TEXT" ,"TEAM_ID_home", "TEAM_ID_away")]
 game_data <- subset(game_data, select = columns_to_keep)
-game_data
+head(game_data,5)
 ```
 
 ### games_details.csv file
 ```{r}
+#taking a look at games_details.csv
 head(game_data_player_specific,5)
 ```
 
-We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', 'START_POSITION', 'MIN', and 'TEAM_ABBREVIATION' since these variables do not focus on player skill or performance during games. We can also remove 'PLUS_MINUS' because it contains lots of NULL observations.
+We can drop 'TEAM_CITY', 'PLAYER_NAME', 'NICKNAME', 'START_POSITION', 'MIN', 'PLUS_MINUS' and 'TEAM_ABBREVIATION' since these variables do not focus on player skill during games.
 ```{r}
 # Removing columns from game_data
-columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "NICKNAME", "PLUS_MINUS" ,"TEAM_ABBREVIATION", "START_POSITION", "MIN")]
+columns_to_keep <- names(game_data_player_specific)[!names(game_data_player_specific) %in% c("TEAM_CITY", "PLAYER_NAME", "NICKNAME", "TEAM_ABBREVIATION", "START_POSITION", "MIN", "PLUS_MINUS")]
 game_data_player_specific <- subset(game_data_player_specific, select = columns_to_keep)
 
 game_data_player_specific 
@@ -79,35 +88,33 @@ game_data_player_specific_filtered
 
 ## Combining Into One Dataframe
 
+Now since we have 'games.csv' and 'games_details.csv' cleaned, let's start the process of combining them.
+
 Let's join the tables by GAME_ID
 
 ```{r}
-# Removing columns from game_data
+#joining the tables by GAME_ID
 total_game_data <- merge(x = game_data_player_specific_filtered, y = game_data, by.x = "GAME_ID", by.y = "GAME_ID", all.x = FALSE, all.y = FALSE)
 total_game_data <- total_game_data[order(total_game_data$GAME_ID), ] 
 
 total_game_data
 ```
 
-Some columns between 'games.csv' and 'gamesdata.csv' are shared and cover the same attributes, so let' remove 'FCM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', and 'AST'. 
-
-
-
-## Aggregating The Data
-
-Now that the data has been combined, we must aggregate the player specific data. This will allow us to analyze how the team performed as a whole for each game.
-
-First, we can see that we have 'FGM' (Field goals made) and 'FGA' (Field goals attempted). We can make an aggregated variables out of this. Let's make a variable 
+Some columns between 'games.csv' and 'gamesdata.csv' are shared and cover the same attributes, so let' remove 'FCM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', 'REB_home', and 'AST'. 
 
 ```{R}
 # Removing columns from total_game_data
-columns_to_keep <- names(total_game_data)[!names(total_game_data) %in% c('FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', 'AST')]
+columns_to_keep <- names(total_game_data)[!names(total_game_data) %in% c('FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'REB', 'REB_home', 'AST')]
 total_game_data <- subset(total_game_data, select = columns_to_keep)
 
 total_game_data
 ```
 
-We will aggregate the data for just home teams, since this study is examining them.
+## Aggregating The Data
+
+Now that the data has been combined, each row has in the dataframe has data on a player's performance in a game and also the team's performance in the game.
+
+We must aggregate the player specific data for each game. This will allow us to analyze how the team performed as a whole. We will aggregate the data for just home teams, since this project is examining them.
 
 #### Aggregating The Data For Home Teams
 ```{R}
@@ -116,7 +123,7 @@ home_team_stats_aggregated <- filter(total_game_data, TEAM_ID == HOME_TEAM_ID)
 home_team_stats_aggregated
 
 #Group by game_id and make aggregate data
-home_team_stats_aggregated <- home_team_stats_aggregated %>% group_by(GAME_ID, HOME_TEAM_ID, VISITOR_TEAM_ID, FG_PCT_home, FT_PCT_home, FG3_PCT_home, AST_home, REB_home, HOME_TEAM_WINS) %>%
+home_team_stats_aggregated <- home_team_stats_aggregated %>% group_by(GAME_ID, HOME_TEAM_ID, VISITOR_TEAM_ID, FG_PCT_home, FT_PCT_home, FG3_PCT_home, AST_home, HOME_TEAM_WINS) %>%
   summarize(OREB_home = sum(OREB), DREB_home = sum(DREB), STL_home = sum(STL), 
             BLK_home = sum(BLK), TO_home = sum(TO), PF_home = sum(PF), avg_PTS_per_player_home = mean(PTS)) 
 
@@ -127,37 +134,62 @@ home_team_stats_aggregated <- subset(home_team_stats_aggregated, select = column
 
 home_team_stats_aggregated 
 ```
+Let's also create log transformations of the variables to see if we need them.
+
+```{R}
+home_team_stats_aggregated_transformed <- home_team_stats_aggregated
+
+home_team_stats_aggregated_transformed$FT_PCT_homeLOG <- log1p(home_team_stats_aggregated_transformed$FT_PCT_home)
+home_team_stats_aggregated_transformed$FG3_PCT_homeLOG <- log1p(home_team_stats_aggregated_transformed$FG3_PCT_home)
+home_team_stats_aggregated_transformed$AST_homeLOG <- log1p(home_team_stats_aggregated_transformed$AST_home)
+home_team_stats_aggregated_transformed$OREB_homeLOG <- log1p(home_team_stats_aggregated_transformed$OREB_home)
+home_team_stats_aggregated_transformed$DREB_homeLOG <- log1p(home_team_stats_aggregated_transformed$DREB_home)
+home_team_stats_aggregated_transformed$STL_homeLOG <- log1p(home_team_stats_aggregated_transformed$STL_home)
+home_team_stats_aggregated_transformed$BLK_homeLOG <- log1p(home_team_stats_aggregated_transformed$BLK_home)
+home_team_stats_aggregated_transformed$TO_homeLOG <- log1p(home_team_stats_aggregated_transformed$TO_home)
+home_team_stats_aggregated_transformed$PF_homeLOG <- log1p(home_team_stats_aggregated_transformed$PF_home)
+home_team_stats_aggregated_transformed$avg_PTS_per_player_homeLOG <- log1p(home_team_stats_aggregated_transformed$avg_PTS_per_player_home)
+
+```
+
+
 
 ## Univariate Analysis
 
 When conducting regression analysis, it is helpful to know the distributions of the data we will use to model. If the data follows a normal distribution, then there is a better chance the residuals (errors between predicted and actual values) are more likely to remain clustered around zero and maintain a normal distribution. Let's start with analyzing central tendency.
 
 ### Analyzing Central Tendency
+First, let's remove the response variable for our model.
 ```{R}
+#removing the response variable from dataframe with transformations
+columns_to_keep <- names(home_team_stats_aggregated_transformed)[!names(home_team_stats_aggregated_transformed) %in% c("HOME_TEAM_WINS")]
+home_team_stats_aggregated_no_response_transformed <- subset(home_team_stats_aggregated_transformed, select = columns_to_keep)
+
+#removing the respnse variable from dataframe without transformations
 columns_to_keep <- names(home_team_stats_aggregated)[!names(home_team_stats_aggregated) %in% c("HOME_TEAM_WINS")]
 home_team_stats_aggregated_no_response <- subset(home_team_stats_aggregated, select = columns_to_keep)
 
 summary(home_team_stats_aggregated_no_response)
 ```
-We can observe from the output above that the means don't deviate much from the medians. This indicates that the unvariate distributions might be approximately normal. Let's look at box plots to observe if there are many outliers in the distributions.
+We can observe from the output above that the means don't deviate much from the medians. Let's look at box plots to observe if there are many outliers in the distributions.
 
 Box plots:
 ```{R}
-column_names <- names(home_team_stats_aggregated_no_response)
+column_names <- names(home_team_stats_aggregated_no_response_transformed)
 
 for (col in column_names) {
-  boxplot(home_team_stats_aggregated_no_response[, col], main = col, xlab = col, ylab = "", notch = FALSE)
+  boxplot(home_team_stats_aggregated_no_response_transformed[, col], main = col, xlab = col, ylab = "", notch = FALSE)
 }
 ```
-There are a large number of outliers across these box plots. This suggests a wider spread of data points compared to a normal distribution. Let's finally plot the distributions to judge their normality and spread.
+There are a large number of outliers across these box plots. This suggests a wider spread of data points compared to a normal distribution. Let's finally plot the distributions to judge their normality and spread. 
 
 ### Analyzing Spread
 
 ```{R}
-column_names <- names(home_team_stats_aggregated_no_response) 
+column_names <- names(home_team_stats_aggregated_no_response_transformed) 
 
 density_plots <- lapply(column_names, function(col) {
-  ggplot(home_team_stats_aggregated_no_response, aes_string(x = col)) +
+  ggplot(home_team_stats_aggregated_no_response_transformed, aes_string(x = col)) +
     stat_density(aes(), geom = "area", alpha = 0.5) +  
     labs(title = col, x = col, y = "Density") +
     theme_bw()
@@ -166,60 +198,90 @@ density_plots <- lapply(column_names, function(col) {
 density_plots
 
 ```
-We can observe that although there is slight skew amongst most of these, many of them appear to follow relatively normal distributions. 
+We can observe that there is skew amongst some of graphs of the normal variables. However, it isn't that concerning. Looking at the graphs of the log() transformed variables, many of these appear to be even more skewed.
 
 Let's conduct Q-Q plots to better analyze normality. Q-Q plots compare the quantiles of two distributions, one being a sample data set and the other being an ideal, standard normal distribution. In our context, we will assess how closely our NBA data measurements follow a normal distribution. If the data perfectly follows the normal distribution, the points on the plot will fall along a straight diagonal line
 
 ### Q-Q Plots and Normality
 
 ```{R}
-qqnorm(home_team_stats_aggregated_no_response$FG_PCT_home, main = "QQplot of FG_PCT_Home")
-qqline(home_team_stats_aggregated_no_response$FG_PCT_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$FG_PCT_home, main = "QQplot of FG_PCT_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$FG_PCT_home)
 
-qqnorm(home_team_stats_aggregated_no_response$FT_PCT_home, main = "QQplot of FT_PCT_Home")
-qqline(home_team_stats_aggregated_no_response$FT_PCT_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$FT_PCT_home, main = "QQplot of FT_PCT_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$FT_PCT_home)
 
-qqnorm(home_team_stats_aggregated_no_response$FG3_PCT_home, main = "QQplot of FG3_PCT_Home")
-qqline(home_team_stats_aggregated_no_response$FG3_PCT_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$FG3_PCT_home, main = "QQplot of FG3_PCT_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$FG3_PCT_home)
 
-qqnorm(home_team_stats_aggregated_no_response$AST_home, main = "QQplot of AST_Home")
-qqline(home_team_stats_aggregated_no_response$AST_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$AST_home, main = "QQplot of AST_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$AST_home)
 
-qqnorm(home_team_stats_aggregated_no_response$REB_home, main = "QQplot of REB_Home")
-qqline(home_team_stats_aggregated_no_response$REB_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$OREB_home, main = "QQplot of OREB_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$OREB_home)
 
-qqnorm(home_team_stats_aggregated_no_response$OREB_home, main = "QQplot of OREB_Home")
-qqline(home_team_stats_aggregated_no_response$OREB_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$DREB_home, main = "QQplot of DREB_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$DREB_home)
 
-qqnorm(home_team_stats_aggregated_no_response$DREB_home, main = "QQplot of DREB_Home")
-qqline(home_team_stats_aggregated_no_response$DREB_home)
-
-qqnorm(home_team_stats_aggregated_no_response$STL_home, main = "QQplot of STL_Home")
-qqline(home_team_stats_aggregated_no_response$STL_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$STL_home, main = "QQplot of STL_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$STL_home)
   
-qqnorm(home_team_stats_aggregated_no_response$BLK_home, main = "QQplot of BLK_Home")
-qqline(home_team_stats_aggregated_no_response$BLK_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$BLK_home, main = "QQplot of BLK_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$BLK_home)
 
-qqnorm(home_team_stats_aggregated_no_response$TO_home, main = "QQplot of TO_Home")
-qqline(home_team_stats_aggregated_no_response$TO_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$TO_home, main = "QQplot of TO_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$TO_home)
 
-qqnorm(home_team_stats_aggregated_no_response$PF_home, main = "QQplot of PF_Home")
-qqline(home_team_stats_aggregated_no_response$PF_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$PF_home, main = "QQplot of PF_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$PF_home)
 
-qqnorm(home_team_stats_aggregated_no_response$avg_PTS_per_player_home, main = "QQplot of Avg_PTS_per_player_Home")
-qqline(home_team_stats_aggregated_no_response$avg_PTS_per_player_home)
+qqnorm(home_team_stats_aggregated_no_response_transformed$avg_PTS_per_player_home, main = "QQplot of Avg_PTS_per_player_Home")
+qqline(home_team_stats_aggregated_no_response_transformed$avg_PTS_per_player_home)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$FT_PCT_homeLOG, main = "QQplot of FT_PCT_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$FT_PCT_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$FG3_PCT_homeLOG, main = "QQplot of FG3_PCT_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$FG3_PCT_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$AST_homeLOG, main = "QQplot of AST_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$AST_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$OREB_homeLOG, main = "QQplot of OREB_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$OREB_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$DREB_homeLOG, main = "QQplot of DREB_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$DREB_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$STL_homeLOG, main = "QQplot of STL_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$STL_homeLOG)
+  
+qqnorm(home_team_stats_aggregated_no_response_transformed$BLK_homeLOG, main = "QQplot of BLK_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$BLK_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$TO_homeLOG, main = "QQplot of TO_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$TO_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$PF_homeLOG, main = "QQplot of PF_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$PF_homeLOG)
+
+qqnorm(home_team_stats_aggregated_no_response_transformed$avg_PTS_per_player_homeLOG, main = "QQplot of Avg_PTS_per_player_HomeLOG")
+qqline(home_team_stats_aggregated_no_response_transformed$avg_PTS_per_player_homeLOG)
+
 
 ```
   
 For the most part, the data on these graphs neatly fall along the diagonal line. The plot of data for 'BLK_Home' is by far the least normally distributed, but because we have such a large sample size, there is still a high chance the errors will be distributed about 0 and follow a normal distribution.
-There is no need to do transformations, like a log() transformation, to any of these variables.  
+
+We will not use the log() transformed variables, since they do not do very significant changes to move the points closer to the diagonal line. In many cases, they actually make the distributions worse. 
+
+
 
 ## Multivariate Analysis
 
 ### Pairplots to view normality
 
 ```{R} 
-
 #Need to provide pair plots of the data to analyze the multivariate relationships 
 par(fig.width = 10, fig.height = 20)
 pairs(home_team_stats_aggregated_no_response, pch = ".", cex = 0.5)
@@ -238,20 +300,122 @@ print(correlation_matrix)
 
 corrplot(correlation_matrix, type = "lower")
 ``` 
-Through the correlation matrix, we can observe which variables have relationships. We can see that avg_PTS_per_player_home and FG_PCT_home have positive correlation with one another.  OREB_home and DREB_home are all positively correlated with REB_home. FG3_PCT_home and AST_home are correlated with FG_PCT_home. AST_home is also correlated with FG3_PCT_home. OREB_home and REB_home interestingly appear to be negatively correlated with FG_PCT_home. All the other correlations are weak and not worth pointing out.
+Through the correlation matrix, we can observe which variables have relationships. We can see that avg_PTS_per_player_home and FG_PCT_home have some positive correlation with one another.  OREB_home and DREB_home are all positively correlated with REB_home. FG3_PCT_home and AST_home are correlated with FG_PCT_home. AST_home is also correlated with FG3_PCT_home. OREB_home and REB_home interestingly appear to be negatively correlated with FG_PCT_home. All the other correlations are weak and not worth pointing out.
 
 ### Dimensionality Reduction and Principal Component Analysis
+
+First, let's analyze the variance of our variables so we can choose whether to conduct Principal component analysis with either the covariance matrix or the correlation matrix.
+
+Variance of variables:
+```{R}
+kable(diag(round(cov(home_team_stats_aggregated_no_response), 2)), col.names=c("Variance"))
+```
+There is a wide range in the variances here. The correlation matrix standardizes the features to a common scale, helping PCA better determine the direction of the linear relationships. Therefore, we will conduct the PCA using the correlation matrix. 
+
 
 ```{R}
 pca.fit.R <- prcomp(home_team_stats_aggregated_no_response, scale.= TRUE)
 kable(round(pca.fit.R$rotation, 2))
 ```
+Looking at the table of principal components and the individual loadings, it is difficult to interpret many of these components.
 
+For principal component 1, We can see that FG_PCT_home, FG3_PCT_home, avg_PTS_per_player_home, and AST_home all have positive loadings. They are counteracted by negative loadings from the variables related to rebounds. This principal component might represent teams with good shooting efficiency and ability to create scoring opportunities for teammates. These teams likely have poor rebounding qualities, however. 
+
+For principal component 2, all the loadings are negative except for STL_home. This component might capture a category related to the importance of steals in determing who wins the game.
+
+For principal component 3, the loadings with the highest magnitude are STL_home, BLK_home, TO_home, and PF_home. These variables could all be categorized under "aggressive, risk-taking game behavior". 
+
+
+Let's analyze the proportions of variance these Principal components explain:
 ```{R}
 summary(pca.fit.R)
 ```
+We can see that the top principal component only explains about 22.56% of the variance. This is not a large amount. The 2nd top principal component explains about 15.75% of the variance. The 3rd top principal component explains about 10.87% of variance.
 
 ```{R}
 par(mfrow=c(1,1), cex=0.5, mar=c(3.1,3.1,1,0.5),mgp=c(1.8,0.5,0), bty="L")
 plot(pca.fit.R, type="l", main="Scree Plot")
+```
+Looking at the scree plot, we can see the "elbow" where the slope of the curve begins to level. It appears that principal components 1, 2, and 3 explain the most variance and might be important to use in a regression model. 
+
+
+
+
+
+
+
+# Model Building
+
+
+
+```{R}
+PCs <- data.frame(PC1 = pca.fit.R$x[,1:3])
+colnames(PCs) <- c("PC1", "PC2",  "PC3")
+home_team_stats_aggregated_PCadded <- cbind(home_team_stats_aggregated, PCs) 
+
+moons.PC.model <- glm(HOME_TEAM_WINS ~ PC1 + PC2 + PC3, family = "binomial", data = home_team_stats_aggregated_PCadded )
+
+summary(moons.PC.model)
+```
+
+
+```{R}
+PCs <- data.frame(PC1 = pca.fit.R$x[,1])
+colnames(PCs) <- c("PC1")
+home_team_stats_aggregated_PCadded <- cbind(home_team_stats_aggregated, PCs) 
+
+moons.PC.model <- glm(HOME_TEAM_WINS ~ FG_PCT_home + DREB_home + STL_home + TO_home + 
+    FG3_PCT_home + OREB_home + FT_PCT_home + avg_PTS_per_player_home + 
+    PF_home + AST_home + BLK_home + FG_PCT_home:FT_PCT_home, data = home_team_stats_aggregated_PCadded, family = "binomial")
+
+summary(moons.PC.model)
+```
+
+```{R}
+avg_PTS_per_player_home <- home_team_stats_aggregated_PCadded$avg_PTS_per_player_home
+wins <- home_team_stats_aggregated_PCadded$HOME_TEAM_WINS
+
+ggplot(data = data.frame(avg_PTS_per_player_home, wins), aes(x = avg_PTS_per_player_home, color = factor(wins))) +
+  geom_density(aes(fill = factor(wins)), alpha = 0.5) +  # Adjust transparency
+  labs(title = "avg_PTS_per_player_home",
+       x = "avg_PTS_per_player_home",
+       y = "Density") +
+  scale_color_manual(values = c("lightblue", "lightcoral"))  # Colors for each category
+
+```
+```{R}
+ast_home <- home_team_stats_aggregated_PCadded$AST_home
+wins <- home_team_stats_aggregated_PCadded$HOME_TEAM_WINS
+
+ggplot(data = data.frame(ast_home, wins), aes(x = ast_home, color = factor(wins))) +
+  geom_density(aes(fill = factor(wins)), alpha = 0.5) +  # Adjust transparency
+  labs(title = "ast_home",
+       x = "ast_home",
+       y = "Density") +
+  scale_color_manual(values = c("lightblue", "lightcoral"))  # Colors for each category
+
+
+```
+
+
+## Model Searching
+
+```{R}
+null = glm(HOME_TEAM_WINS ~ 1, data = home_team_stats_aggregated_PCadded, family = 'binomial')
+full = glm(HOME_TEAM_WINS ~  FG_PCT_home + FT_PCT_home + FG3_PCT_home + AST_home + OREB_home + DREB_home + STL_home
++ BLK_home + TO_home + PF_home + avg_PTS_per_player_home + FG_PCT_home*FT_PCT_home + FG_PCT_home*FG3_PCT_home + BLK_home * STL_home
++ TO_home * PF_home , data = home_team_stats_aggregated_PCadded,  family = 'binomial')
+n = dim(home_team_stats_aggregated_PCadded)[1]
+```
+
+AIC Forward:
+
+```{R}
+stepAIC(null, scope = list(upper = full), direction = "forward", k = 2)
+```
+
+
+AIC Backward:
+```{R}
+stepAIC(full, direction = "backward", k = 2)
 ```
